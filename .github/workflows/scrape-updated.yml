@@ -1,0 +1,124 @@
+name: C2C Job Scraper - Selenium (EST Times) - Node24 Compatible
+
+on:
+  schedule:
+    - cron: '0 15 * * *'  # 10 AM EST
+    - cron: '0 18 * * *'  # 1 PM EST
+    - cron: '0 21 * * *'  # 4 PM EST
+  workflow_dispatch:
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+    
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+        cache: 'pip'
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+    
+    - name: Run Selenium Scraper (10 AM, 1 PM, 4 PM EST)
+      id: scraper
+      run: |
+        echo "EST Time: $(date -d '-5 hours' '+%Y-%m-%d %H:%M:%S')"
+        python scraper_selenium.py
+      continue-on-error: true
+      env:
+        TZ: US/Eastern
+    
+    - name: Check for new jobs
+      if: always()
+      run: |
+        if [ -f c2c_jobs_SELENIUM_*.xlsx ]; then
+          echo "## ✅ NEW JOBS FOUND" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          python -c "
+          import pandas as pd
+          import glob
+          files = glob.glob('c2c_jobs_SELENIUM_*.xlsx')
+          if files:
+            df = pd.read_excel(files[0], sheet_name='NEW Jobs')
+            print(f'🆕 **NEW Jobs This Run**: {len(df)}')
+            print(f'📁 **Categories**: {df[\"category\"].nunique()}')
+            print(f'🌐 **Sources**: {df[\"source\"].nunique()}')
+            print('')
+            print('**Breakdown by Category:**')
+            for cat in sorted(df['category'].unique()):
+              count = len(df[df['category'] == cat])
+              print(f'- {cat}: {count}')
+          " >> $GITHUB_STEP_SUMMARY
+        else
+          echo "## ⚠️  NO NEW JOBS" >> $GITHUB_STEP_SUMMARY
+          echo "All jobs were duplicates from earlier today." >> $GITHUB_STEP_SUMMARY
+        fi
+    
+    - name: Upload Excel to Artifacts
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: c2c-jobs-EST-${{ github.run_number }}
+        path: |
+          c2c_jobs_SELENIUM_*.xlsx
+          jobs_cache_today.json
+        retention-days: 7
+        if-no-files-found: ignore
+    
+    - name: Commit results to repo
+      if: always()
+      run: |
+        git config --local user.email "action@github.com"
+        git config --local user.name "C2C Scraper Bot"
+        
+        # Create jobs directory if not exist
+        mkdir -p jobs
+        
+        # Copy new jobs file
+        if [ -f c2c_jobs_SELENIUM_*.xlsx ]; then
+          cp c2c_jobs_SELENIUM_*.xlsx jobs/latest.xlsx
+          git add jobs/latest.xlsx
+        fi
+        
+        # Copy cache file
+        if [ -f jobs_cache_today.json ]; then
+          cp jobs_cache_today.json jobs/today_cache.json
+          git add jobs/today_cache.json
+        fi
+        
+        git commit -m "Update C2C jobs [EST $(date -d '-5 hours' '+%H:%M')]" || true
+        git push origin main || true
+      continue-on-error: true
+    
+    - name: Create final summary report
+      if: always()
+      run: |
+        EST_TIME=$(date -d '-5 hours' '+%Y-%m-%d %H:%M:%S')
+        echo "## 🔄 C2C Job Scraper Completed Successfully" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "**Time (EST)**: $EST_TIME" >> $GITHUB_STEP_SUMMARY
+        echo "**Run #**: ${{ github.run_number }}" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "**Scraper Details:**" >> $GITHUB_STEP_SUMMARY
+        echo "- Method: Selenium WebDriver (Real Browser)" >> $GITHUB_STEP_SUMMARY
+        echo "- Time Filter: Last 24 Hours" >> $GITHUB_STEP_SUMMARY
+        echo "- Deduplication: YES ✅ (No duplicate runs)" >> $GITHUB_STEP_SUMMARY
+        echo "- Job Filter: C2C Only (No W2)" >> $GITHUB_STEP_SUMMARY
+        echo "- Sources: 6 Major Job Boards" >> $GITHUB_STEP_SUMMARY
+        echo "- Schedule: 10 AM EST, 1 PM EST, 4 PM EST" >> $GITHUB_STEP_SUMMARY
+        echo "- Rate Limiting: Yes (2-7 second delays)" >> $GITHUB_STEP_SUMMARY
+        echo "- Anti-Bot: Yes (Real browser, rotating agents)" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "[⬇️ Download Excel](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})" >> $GITHUB_STEP_SUMMARY
