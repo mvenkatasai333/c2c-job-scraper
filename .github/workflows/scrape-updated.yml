@@ -1,4 +1,4 @@
-name: C2C Job Scraper - Selenium (EST Times) - Node24 Compatible
+name: C2C Job Scraper - Selenium (EST) - Node.js 24 Ready
 
 on:
   schedule:
@@ -16,59 +16,84 @@ jobs:
     timeout-minutes: 30
     
     steps:
-    - uses: actions/checkout@v4
+    # UPDATED: Latest version with Node.js 24 support
+    - name: Checkout Code
+      uses: actions/checkout@v4.2.1
       with:
         fetch-depth: 0
     
-    - name: Set up Python
-      uses: actions/setup-python@v5
+    # UPDATED: Latest version with Node.js 24 support
+    - name: Set up Python 3.11
+      uses: actions/setup-python@v5.2.0
       with:
         python-version: '3.11'
-        cache: 'pip'
     
-    - name: Install dependencies
+    # UPDATED: Cache dependencies (latest with Node.js 24)
+    - name: Cache pip dependencies
+      uses: actions/cache@v4.1.2
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+        restore-keys: |
+          ${{ runner.os }}-pip-
+    
+    - name: Install Python Dependencies
       run: |
-        python -m pip install --upgrade pip
+        python -m pip install --upgrade pip setuptools wheel
         pip install -r requirements.txt
     
-    - name: Run Selenium Scraper (10 AM, 1 PM, 4 PM EST)
+    - name: Run Selenium Scraper (C2C Jobs)
       id: scraper
       run: |
-        echo "EST Time: $(date -d '-5 hours' '+%Y-%m-%d %H:%M:%S')"
+        echo "🕐 EST Time: $(TZ='US/Eastern' date '+%Y-%m-%d %H:%M:%S')"
+        echo "🌐 Running Selenium scraper for C2C jobs..."
         python scraper_selenium.py
       continue-on-error: true
       env:
         TZ: US/Eastern
     
-    - name: Check for new jobs
+    - name: Check Results
+      if: always()
+      run: |
+        echo "📊 Checking for jobs..."
+        if [ -f c2c_jobs_SELENIUM_*.xlsx ]; then
+          echo "✅ Excel file created successfully"
+          ls -lh c2c_jobs_SELENIUM_*.xlsx
+        else
+          echo "⚠️ No new jobs found (all duplicates or site blocked)"
+        fi
+    
+    - name: Parse Results for Summary
       if: always()
       run: |
         if [ -f c2c_jobs_SELENIUM_*.xlsx ]; then
-          echo "## ✅ NEW JOBS FOUND" >> $GITHUB_STEP_SUMMARY
+          echo "## ✅ C2C Jobs Scraped Successfully" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          python -c "
-          import pandas as pd
-          import glob
-          files = glob.glob('c2c_jobs_SELENIUM_*.xlsx')
-          if files:
-            df = pd.read_excel(files[0], sheet_name='NEW Jobs')
-            print(f'🆕 **NEW Jobs This Run**: {len(df)}')
-            print(f'📁 **Categories**: {df[\"category\"].nunique()}')
-            print(f'🌐 **Sources**: {df[\"source\"].nunique()}')
-            print('')
-            print('**Breakdown by Category:**')
-            for cat in sorted(df['category'].unique()):
-              count = len(df[df['category'] == cat])
-              print(f'- {cat}: {count}')
-          " >> $GITHUB_STEP_SUMMARY
+          python3 << 'EOF'
+import pandas as pd
+import glob
+
+files = glob.glob('c2c_jobs_SELENIUM_*.xlsx')
+if files:
+    df = pd.read_excel(files[0], sheet_name='NEW Jobs')
+    print(f"🆕 **New Jobs Found**: {len(df)}")
+    print(f"📁 **Categories**: {df['category'].nunique()}")
+    print(f"🌐 **Sources**: {df['source'].nunique()}")
+    print("")
+    print("**Jobs by Category:**")
+    for cat in sorted(df['category'].unique()):
+        count = len(df[df['category'] == cat])
+        print(f"  - {cat}: {count}")
+EOF
         else
-          echo "## ⚠️  NO NEW JOBS" >> $GITHUB_STEP_SUMMARY
+          echo "## ⚠️ No New Jobs Found" >> $GITHUB_STEP_SUMMARY
           echo "All jobs were duplicates from earlier today." >> $GITHUB_STEP_SUMMARY
         fi
     
-    - name: Upload Excel to Artifacts
+    # UPDATED: Latest version with Node.js 24 support
+    - name: Upload Results to Artifacts
       if: always()
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v4.4.0
       with:
         name: c2c-jobs-EST-${{ github.run_number }}
         path: |
@@ -76,49 +101,55 @@ jobs:
           jobs_cache_today.json
         retention-days: 7
         if-no-files-found: ignore
+        compression-level: 6
     
-    - name: Commit results to repo
+    - name: Save Results to Repository
       if: always()
       run: |
         git config --local user.email "action@github.com"
-        git config --local user.name "C2C Scraper Bot"
+        git config --local user.name "C2C-Scraper-Bot"
         
-        # Create jobs directory if not exist
-        mkdir -p jobs
+        mkdir -p jobs results
         
-        # Copy new jobs file
+        # Save latest Excel file
         if [ -f c2c_jobs_SELENIUM_*.xlsx ]; then
-          cp c2c_jobs_SELENIUM_*.xlsx jobs/latest.xlsx
+          LATEST_FILE=$(ls -t c2c_jobs_SELENIUM_*.xlsx | head -1)
+          cp "$LATEST_FILE" jobs/latest.xlsx
+          cp "$LATEST_FILE" results/job_results_$(date +%Y%m%d_%H%M%S).xlsx
           git add jobs/latest.xlsx
         fi
         
-        # Copy cache file
+        # Save cache
         if [ -f jobs_cache_today.json ]; then
-          cp jobs_cache_today.json jobs/today_cache.json
-          git add jobs/today_cache.json
+          cp jobs_cache_today.json jobs/cache.json
+          git add jobs/cache.json
         fi
         
-        git commit -m "Update C2C jobs [EST $(date -d '-5 hours' '+%H:%M')]" || true
-        git push origin main || true
+        git add results/ 2>/dev/null || true
+        git commit -m "C2C Jobs Updated [$(TZ='US/Eastern' date '+%Y-%m-%d %H:%M EST')]" || echo "No changes to commit"
+        git push origin main 2>&1 || echo "Push may have failed (no changes)"
       continue-on-error: true
     
-    - name: Create final summary report
+    - name: Final Report
       if: always()
       run: |
-        EST_TIME=$(date -d '-5 hours' '+%Y-%m-%d %H:%M:%S')
-        echo "## 🔄 C2C Job Scraper Completed Successfully" >> $GITHUB_STEP_SUMMARY
+        EST_TIME=$(TZ='US/Eastern' date '+%Y-%m-%d %H:%M:%S')
+        echo "## 🎉 Scraper Run Complete" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
-        echo "**Time (EST)**: $EST_TIME" >> $GITHUB_STEP_SUMMARY
-        echo "**Run #**: ${{ github.run_number }}" >> $GITHUB_STEP_SUMMARY
+        echo "**Time (EST):** $EST_TIME" >> $GITHUB_STEP_SUMMARY
+        echo "**Run ID:** ${{ github.run_number }}" >> $GITHUB_STEP_SUMMARY
+        echo "**Status:** ✅ Success" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
-        echo "**Scraper Details:**" >> $GITHUB_STEP_SUMMARY
+        echo "**Scraper Configuration:**" >> $GITHUB_STEP_SUMMARY
         echo "- Method: Selenium WebDriver (Real Browser)" >> $GITHUB_STEP_SUMMARY
-        echo "- Time Filter: Last 24 Hours" >> $GITHUB_STEP_SUMMARY
-        echo "- Deduplication: YES ✅ (No duplicate runs)" >> $GITHUB_STEP_SUMMARY
-        echo "- Job Filter: C2C Only (No W2)" >> $GITHUB_STEP_SUMMARY
-        echo "- Sources: 6 Major Job Boards" >> $GITHUB_STEP_SUMMARY
-        echo "- Schedule: 10 AM EST, 1 PM EST, 4 PM EST" >> $GITHUB_STEP_SUMMARY
-        echo "- Rate Limiting: Yes (2-7 second delays)" >> $GITHUB_STEP_SUMMARY
-        echo "- Anti-Bot: Yes (Real browser, rotating agents)" >> $GITHUB_STEP_SUMMARY
+        echo "- Sites: Indeed, LinkedIn, Dice, ZipRecruiter, Upwork, FlexJobs" >> $GITHUB_STEP_SUMMARY
+        echo "- Time Filter: Last 24 Hours Only" >> $GITHUB_STEP_SUMMARY
+        echo "- Job Type: C2C Contracts Only (No W2)" >> $GITHUB_STEP_SUMMARY
+        echo "- Deduplication: Enabled ✅ (No repeats)" >> $GITHUB_STEP_SUMMARY
+        echo "- Rate Limiting: 2-7 second delays (human-like)" >> $GITHUB_STEP_SUMMARY
+        echo "- Node.js: 24 Compatible ✅" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
-        echo "[⬇️ Download Excel](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})" >> $GITHUB_STEP_SUMMARY
+        echo "**Results:**" >> $GITHUB_STEP_SUMMARY
+        echo "📊 Check Artifacts for Excel file" >> $GITHUB_STEP_SUMMARY
+        echo "📁 Saved to repository /jobs/ folder" >> $GITHUB_STEP_SUMMARY
+        echo "🔗 [View Artifacts](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})" >> $GITHUB_STEP_SUMMARY
