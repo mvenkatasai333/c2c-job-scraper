@@ -332,7 +332,7 @@ async def scrape_glassdoor_pw():
 # EXCEL OUTPUT
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def write_excel(jobs, filename="c2c_data_jobs.xlsx"):
+def write_excel(jobs, filename="c2c_jobs.xlsx"):
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = "C2C Jobs"
