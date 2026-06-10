@@ -69,7 +69,7 @@ jobs:
         if [ -f c2c_jobs_SELENIUM_*.xlsx ]; then
           echo "## ✅ C2C Jobs Scraped Successfully" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          python3 << 'EOF'
+          python3 << 'PYTHON_EOF'
 import pandas as pd
 import glob
 
@@ -84,7 +84,7 @@ if files:
     for cat in sorted(df['category'].unique()):
         count = len(df[df['category'] == cat])
         print(f"  - {cat}: {count}")
-EOF
+PYTHON_EOF
         else
           echo "## ⚠️ No New Jobs Found" >> $GITHUB_STEP_SUMMARY
           echo "All jobs were duplicates from earlier today." >> $GITHUB_STEP_SUMMARY
@@ -102,6 +102,94 @@ EOF
         retention-days: 7
         if-no-files-found: ignore
         compression-level: 6
+    
+    - name: Send Email with Results
+      if: always()
+      run: |
+        python3 << 'PYTHON_EOF'
+import os
+import glob
+import smtplib
+from email.mime.multipart import MIMEMultipart
+from email.mime.base import MIMEBase
+from email.mime.text import MIMEText
+from email import encoders
+
+sender = os.environ.get("EMAIL_SENDER", "")
+password = os.environ.get("EMAIL_PASSWORD", "")
+receiver = os.environ.get("EMAIL_RECEIVER", "")
+
+if not all([sender, password, receiver]):
+    print("⚠️ Email credentials not set. Skipping email.")
+    exit(0)
+
+# Find the latest Excel file
+files = glob.glob('c2c_jobs_SELENIUM_*.xlsx')
+if not files:
+    print("⚠️ No Excel files found. Skipping email.")
+    exit(0)
+
+latest_file = max(files, key=os.path.getctime)
+job_count = len(glob.glob('c2c_jobs_SELENIUM_*.xlsx'))
+
+# Build email
+msg = MIMEMultipart()
+msg["From"] = sender
+msg["To"] = receiver
+msg["Subject"] = f"🔥 C2C Contract Jobs - {job_count} New Opportunities"
+
+body = f"""
+Hi!
+
+{job_count} new C2C contract jobs have been scraped!
+
+📊 Check the attached Excel file for:
+  ✅ Job titles
+  ✅ Company names
+  ✅ Direct apply links
+  ✅ Source breakdown
+  ✅ Last 24 hours only
+
+This job list is automatically deduplicated - no repeats!
+
+Roles covered:
+  • Data Engineer
+  • Snowflake Developer
+  • Power BI Developer
+  • Data Analyst
+  • ML Engineer
+  • Data Architect
+
+💼 Apply now and get ahead!
+
+-- C2C Job Scraper (GitHub Actions)
+"""
+
+msg.attach(MIMEText(body, "plain"))
+
+# Attach Excel file
+with open(latest_file, "rb") as attachment:
+    part = MIMEBase("application", "octet-stream")
+    part.set_payload(attachment.read())
+
+encoders.encode_base64(part)
+part.add_header("Content-Disposition", f"attachment; filename= {latest_file}")
+msg.attach(part)
+
+# Send email
+try:
+    with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
+        server.login(sender, password)
+        server.sendmail(sender, receiver, msg.as_string())
+    print(f"✅ Email sent successfully to {receiver}")
+except Exception as e:
+    print(f"❌ Email failed: {str(e)}")
+PYTHON_EOF
+      continue-on-error: true
+      env:
+        EMAIL_SENDER: ${{ secrets.EMAIL_SENDER }}
+        EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
+        EMAIL_RECEIVER: ${{ secrets.EMAIL_RECEIVER }}
     
     - name: Save Results to Repository
       if: always()
@@ -148,8 +236,10 @@ EOF
         echo "- Deduplication: Enabled ✅ (No repeats)" >> $GITHUB_STEP_SUMMARY
         echo "- Rate Limiting: 2-7 second delays (human-like)" >> $GITHUB_STEP_SUMMARY
         echo "- Node.js: 24 Compatible ✅" >> $GITHUB_STEP_SUMMARY
+        echo "- Email: Enabled ✅" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
         echo "**Results:**" >> $GITHUB_STEP_SUMMARY
         echo "📊 Check Artifacts for Excel file" >> $GITHUB_STEP_SUMMARY
         echo "📁 Saved to repository /jobs/ folder" >> $GITHUB_STEP_SUMMARY
+        echo "📧 Email sent with attachment" >> $GITHUB_STEP_SUMMARY
         echo "🔗 [View Artifacts](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})" >> $GITHUB_STEP_SUMMARY
