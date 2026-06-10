@@ -1,151 +1,65 @@
-name: C2C Job Scraper - Selenium (EST) - Node.js 24 Ready
+#!/usr/bin/env python3
+"""
+Send C2C Jobs Excel via Email
+"""
+import os
+import glob
+import smtplib
+from email.mime.multipart import MIMEMultipart
+from email.mime.base import MIMEBase
+from email.mime.text import MIMEText
+from email import encoders
 
-on:
-  schedule:
-    - cron: '0 15 * * *'  # 10 AM EST
-    - cron: '0 18 * * *'  # 1 PM EST
-    - cron: '0 21 * * *'  # 4 PM EST
-  workflow_dispatch:
+sender = os.environ.get("EMAIL_SENDER", "")
+password = os.environ.get("EMAIL_PASSWORD", "")
+receiver = os.environ.get("EMAIL_RECEIVER", "")
 
-jobs:
-  scrape:
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    
-    steps:
-    - name: Checkout Code
-      uses: actions/checkout@v4.2.1
-      with:
-        fetch-depth: 0
-    
-    - name: Set up Python 3.11
-      uses: actions/setup-python@v5.2.0
-      with:
-        python-version: '3.11'
-    
-    - name: Cache pip dependencies
-      uses: actions/cache@v4.1.2
-      with:
-        path: ~/.cache/pip
-        key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
-        restore-keys: |
-          ${{ runner.os }}-pip-
-    
-    - name: Install Python Dependencies
-      run: |
-        python -m pip install --upgrade pip setuptools wheel
-        pip install -r requirements.txt
-    
-    - name: Run Scraper (C2C Jobs)
-      run: python scraper.py
-      continue-on-error: true
-    
-    - name: Check Results
-      if: always()
-      run: |
-        if [ -f c2c_jobs_*.xlsx ]; then
-          echo "✅ Excel file created"
-          ls -lh c2c_jobs_*.xlsx
-        else
-          echo "⚠️ No jobs found"
-        fi
-    
-    - name: Upload Results to Artifacts
-      if: always()
-      uses: actions/upload-artifact@v4.4.0
-      with:
-        name: c2c-jobs-${{ github.run_number }}
-        path: c2c_jobs_*.xlsx
-        retention-days: 7
-        if-no-files-found: ignore
-    
-    - name: Send Email with Results
-      if: always()
-      env:
-        EMAIL_SENDER: ${{ secrets.EMAIL_SENDER }}
-        EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
-        EMAIL_RECEIVER: ${{ secrets.EMAIL_RECEIVER }}
-      run: |
-        python3 > /dev/null 2>&1 << 'PYEOF'
-        import os
-        import glob
-        import smtplib
-        from email.mime.multipart import MIMEMultipart
-        from email.mime.base import MIMEBase
-        from email.mime.text import MIMEText
-        from email import encoders
-        
-        sender = os.environ.get("EMAIL_SENDER", "")
-        password = os.environ.get("EMAIL_PASSWORD", "")
-        receiver = os.environ.get("EMAIL_RECEIVER", "")
-        
-        if not all([sender, password, receiver]):
-            print("⚠️ Email credentials not set")
-            exit(0)
-        
-        files = glob.glob('c2c_jobs_*.xlsx')
-        if not files:
-            print("⚠️ No Excel files found")
-            exit(0)
-        
-        latest_file = max(files, key=os.path.getctime)
-        
-        msg = MIMEMultipart()
-        msg["From"] = sender
-        msg["To"] = receiver
-        msg["Subject"] = "🔥 C2C Contract Jobs - New Opportunities"
-        
-        body = """Hi!
-        
-        New C2C contract jobs have been found!
-        
-        📊 Excel file includes:
-          ✅ Job titles
-          ✅ Company names
-          ✅ Direct apply links
-          ✅ No duplicates
-        
-        Roles: Data Engineer, Snowflake, Power BI, Data Analyst, ML Engineer
-        
-        💼 Apply now!
-        
-        -- C2C Job Scraper
-        """
-        
-        msg.attach(MIMEText(body, "plain"))
-        
-        with open(latest_file, "rb") as attachment:
-            part = MIMEBase("application", "octet-stream")
-            part.set_payload(attachment.read())
-            encoders.encode_base64(part)
-            part.add_header("Content-Disposition", f"attachment; filename={latest_file}")
-            msg.attach(part)
-        
-        try:
-            with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
-                server.login(sender, password)
-                server.sendmail(sender, receiver, msg.as_string())
-            print(f"✅ Email sent to {receiver}")
-        except Exception as e:
-            print(f"❌ Email failed: {str(e)}")
-        PYEOF
-      continue-on-error: true
-    
-    - name: Save Results to Repository
-      if: always()
-      run: |
-        git config --local user.email "action@github.com"
-        git config --local user.name "C2C-Scraper-Bot"
-        mkdir -p jobs
-        if [ -f c2c_jobs_*.xlsx ]; then
-          cp c2c_jobs_*.xlsx jobs/latest.xlsx 2>/dev/null || true
-          git add jobs/latest.xlsx 2>/dev/null || true
-        fi
-        git commit -m "C2C Jobs Updated" 2>/dev/null || echo "No changes"
-        git push origin main 2>/dev/null || echo "Push skipped"
-      continue-on-error: true
-    
-    - name: Final Report
-      if: always()
-      run: |
-        echo "✅ Scraper run complete"
+if not all([sender, password, receiver]):
+    print("⚠️ Email credentials not set. Skipping email.")
+    exit(0)
+
+files = glob.glob('c2c_jobs_*.xlsx')
+if not files:
+    print("⚠️ No Excel files found. Skipping email.")
+    exit(0)
+
+latest_file = max(files, key=os.path.getctime)
+
+msg = MIMEMultipart()
+msg["From"] = sender
+msg["To"] = receiver
+msg["Subject"] = "🔥 C2C Contract Jobs - New Opportunities"
+
+body = """Hi!
+
+New C2C contract jobs have been found!
+
+📊 Excel file includes:
+  ✅ Job titles
+  ✅ Company names
+  ✅ Direct apply links
+  ✅ No duplicates
+
+Roles: Data Engineer, Snowflake, Power BI, Data Analyst, ML Engineer
+
+💼 Apply now!
+
+-- C2C Job Scraper
+"""
+
+msg.attach(MIMEText(body, "plain"))
+
+with open(latest_file, "rb") as attachment:
+    part = MIMEBase("application", "octet-stream")
+    part.set_payload(attachment.read())
+    encoders.encode_base64(part)
+    part.add_header("Content-Disposition", f"attachment; filename={latest_file}")
+    msg.attach(part)
+
+try:
+    with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
+        server.login(sender, password)
+        server.sendmail(sender, receiver, msg.as_string())
+    print(f"✅ Email sent to {receiver}")
+except Exception as e:
+    print(f"❌ Email failed: {str(e)}")
