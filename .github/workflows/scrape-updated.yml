@@ -47,7 +47,7 @@ jobs:
       run: |
         echo "🕐 EST Time: $(TZ='US/Eastern' date '+%Y-%m-%d %H:%M:%S')"
         echo "🌐 Running Selenium scraper for C2C jobs..."
-        python scraper_selenium.py
+        python scraper.py
       continue-on-error: true
       env:
         TZ: US/Eastern
