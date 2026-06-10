@@ -7,9 +7,6 @@ on:
     - cron: '0 21 * * *'  # 4 PM EST
   workflow_dispatch:
 
-env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-
 jobs:
   scrape:
     runs-on: ubuntu-latest
@@ -40,17 +37,14 @@ jobs:
         pip install -r requirements.txt
     
     - name: Run Scraper (C2C Jobs)
-      id: scraper
       run: python scraper.py
       continue-on-error: true
-      env:
-        TZ: US/Eastern
     
     - name: Check Results
       if: always()
       run: |
         if [ -f c2c_jobs_*.xlsx ]; then
-          echo "✅ Excel file created successfully"
+          echo "✅ Excel file created"
           ls -lh c2c_jobs_*.xlsx
         else
           echo "⚠️ No jobs found"
@@ -61,83 +55,81 @@ jobs:
       uses: actions/upload-artifact@v4.4.0
       with:
         name: c2c-jobs-${{ github.run_number }}
-        path: |
-          c2c_jobs_*.xlsx
-          seen_jobs.json
+        path: c2c_jobs_*.xlsx
         retention-days: 7
         if-no-files-found: ignore
     
     - name: Send Email with Results
       if: always()
-      run: python3 << 'EOF'
-import os
-import glob
-import smtplib
-from email.mime.multipart import MIMEMultipart
-from email.mime.base import MIMEBase
-from email.mime.text import MIMEText
-from email import encoders
-
-sender = os.environ.get("EMAIL_SENDER", "")
-password = os.environ.get("EMAIL_PASSWORD", "")
-receiver = os.environ.get("EMAIL_RECEIVER", "")
-
-if not all([sender, password, receiver]):
-    print("⚠️ Email credentials not set. Skipping email.")
-    exit(0)
-
-files = glob.glob('c2c_jobs_*.xlsx')
-if not files:
-    print("⚠️ No Excel files found. Skipping email.")
-    exit(0)
-
-latest_file = max(files, key=os.path.getctime)
-
-msg = MIMEMultipart()
-msg["From"] = sender
-msg["To"] = receiver
-msg["Subject"] = "🔥 C2C Contract Jobs - New Opportunities"
-
-body = """Hi!
-
-New C2C contract jobs have been found and are attached!
-
-📊 Excel file includes:
-  ✅ Job titles
-  ✅ Company names
-  ✅ Direct apply links
-  ✅ Source breakdown
-  ✅ No duplicates
-
-Roles: Data Engineer, Snowflake, Power BI, Data Analyst, ML Engineer
-
-💼 Apply now!
-
--- C2C Job Scraper (GitHub Actions)
-"""
-
-msg.attach(MIMEText(body, "plain"))
-
-with open(latest_file, "rb") as attachment:
-    part = MIMEBase("application", "octet-stream")
-    part.set_payload(attachment.read())
-    encoders.encode_base64(part)
-    part.add_header("Content-Disposition", f"attachment; filename={latest_file}")
-    msg.attach(part)
-
-try:
-    with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
-        server.login(sender, password)
-        server.sendmail(sender, receiver, msg.as_string())
-    print(f"✅ Email sent to {receiver}")
-except Exception as e:
-    print(f"❌ Email failed: {str(e)}")
-EOF
-      continue-on-error: true
       env:
         EMAIL_SENDER: ${{ secrets.EMAIL_SENDER }}
         EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
         EMAIL_RECEIVER: ${{ secrets.EMAIL_RECEIVER }}
+      run: |
+        python3 > /dev/null 2>&1 << 'PYEOF'
+        import os
+        import glob
+        import smtplib
+        from email.mime.multipart import MIMEMultipart
+        from email.mime.base import MIMEBase
+        from email.mime.text import MIMEText
+        from email import encoders
+        
+        sender = os.environ.get("EMAIL_SENDER", "")
+        password = os.environ.get("EMAIL_PASSWORD", "")
+        receiver = os.environ.get("EMAIL_RECEIVER", "")
+        
+        if not all([sender, password, receiver]):
+            print("⚠️ Email credentials not set")
+            exit(0)
+        
+        files = glob.glob('c2c_jobs_*.xlsx')
+        if not files:
+            print("⚠️ No Excel files found")
+            exit(0)
+        
+        latest_file = max(files, key=os.path.getctime)
+        
+        msg = MIMEMultipart()
+        msg["From"] = sender
+        msg["To"] = receiver
+        msg["Subject"] = "🔥 C2C Contract Jobs - New Opportunities"
+        
+        body = """Hi!
+        
+        New C2C contract jobs have been found!
+        
+        📊 Excel file includes:
+          ✅ Job titles
+          ✅ Company names
+          ✅ Direct apply links
+          ✅ No duplicates
+        
+        Roles: Data Engineer, Snowflake, Power BI, Data Analyst, ML Engineer
+        
+        💼 Apply now!
+        
+        -- C2C Job Scraper
+        """
+        
+        msg.attach(MIMEText(body, "plain"))
+        
+        with open(latest_file, "rb") as attachment:
+            part = MIMEBase("application", "octet-stream")
+            part.set_payload(attachment.read())
+            encoders.encode_base64(part)
+            part.add_header("Content-Disposition", f"attachment; filename={latest_file}")
+            msg.attach(part)
+        
+        try:
+            with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
+                server.login(sender, password)
+                server.sendmail(sender, receiver, msg.as_string())
+            print(f"✅ Email sent to {receiver}")
+        except Exception as e:
+            print(f"❌ Email failed: {str(e)}")
+        PYEOF
+      continue-on-error: true
     
     - name: Save Results to Repository
       if: always()
@@ -146,20 +138,14 @@ EOF
         git config --local user.name "C2C-Scraper-Bot"
         mkdir -p jobs
         if [ -f c2c_jobs_*.xlsx ]; then
-          cp c2c_jobs_*.xlsx jobs/latest.xlsx
-          git add jobs/latest.xlsx
+          cp c2c_jobs_*.xlsx jobs/latest.xlsx 2>/dev/null || true
+          git add jobs/latest.xlsx 2>/dev/null || true
         fi
-        if [ -f seen_jobs.json ]; then
-          cp seen_jobs.json jobs/cache.json
-          git add jobs/cache.json
-        fi
-        git commit -m "C2C Jobs Updated" || echo "No changes"
-        git push origin main || echo "Push failed"
+        git commit -m "C2C Jobs Updated" 2>/dev/null || echo "No changes"
+        git push origin main 2>/dev/null || echo "Push skipped"
       continue-on-error: true
     
     - name: Final Report
       if: always()
       run: |
-        echo "## 🎉 Scraper Run Complete" >> $GITHUB_STEP_SUMMARY
-        echo "✅ Status: Success" >> $GITHUB_STEP_SUMMARY
-        echo "📧 Email: Enabled" >> $GITHUB_STEP_SUMMARY
+        echo "✅ Scraper run complete"
